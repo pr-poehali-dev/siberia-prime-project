@@ -99,9 +99,10 @@ interface RouletteWheelProps {
   onSpin: (number: number) => void;
   spinning: boolean;
   setSpinning: (v: boolean) => void;
+  muted: boolean;
 }
 
-export default function RouletteWheel({ onSpin, spinning, setSpinning }: RouletteWheelProps) {
+export default function RouletteWheel({ onSpin, spinning, setSpinning, muted }: RouletteWheelProps) {
   const [rotation, setRotation] = useState(0);
   const [lastResult, setLastResult] = useState<number | null>(null);
   const [showParticles, setShowParticles] = useState(false);
@@ -154,13 +155,13 @@ export default function RouletteWheel({ onSpin, spinning, setSpinning }: Roulett
       rotationRef.current = current;
 
       // tension drone starts at 70% progress (замедление ощутимо)
-      if (ctx && progress >= 0.70 && !tensionStarted) {
+      if (ctx && !muted && progress >= 0.70 && !tensionStarted) {
         tensionStarted = true;
         stopTension = playTension(ctx);
       }
 
       // tick sound on each segment crossing
-      if (ctx) {
+      if (ctx && !muted) {
         const angleDelta = current - lastTickAngleRef.current;
         if (angleDelta >= SEGMENT_ANGLE) {
           const ticksCount = Math.floor(angleDelta / SEGMENT_ANGLE);
@@ -179,7 +180,7 @@ export default function RouletteWheel({ onSpin, spinning, setSpinning }: Roulett
         setSpinning(false);
         setLastResult(targetNumber);
         onSpin(targetNumber);
-        if (ctx) playWin(ctx);
+        if (ctx && !muted) playWin(ctx);
         setShowParticles(true);
         setTimeout(() => setShowParticles(false), 3000);
       }

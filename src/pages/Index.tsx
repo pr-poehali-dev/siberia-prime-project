@@ -25,6 +25,7 @@ export default function Index() {
   const [activeSection, setActiveSection] = useState("home");
   const [history, setHistory] = useState<SpinResult[]>([]);
   const [spinning, setSpinning] = useState(false);
+  const [muted, setMuted] = useState(false);
   const spinIdRef = useRef(0);
 
   const handleSpin = useCallback((number: number) => {
@@ -40,7 +41,7 @@ export default function Index() {
 
   return (
     <div className="min-h-screen casino-bg">
-      <NavBar activeSection={activeSection} onNavigate={setActiveSection} />
+      <NavBar activeSection={activeSection} onNavigate={setActiveSection} muted={muted} onToggleMute={() => setMuted(m => !m)} />
 
       {activeSection === "home" && (
         <main className="pt-20">
@@ -58,7 +59,7 @@ export default function Index() {
 
             <div className="flex flex-col xl:flex-row gap-8 items-start justify-center">
               <div className="flex-1 flex justify-center">
-                <RouletteWheel onSpin={handleSpin} spinning={spinning} setSpinning={setSpinning} />
+                <RouletteWheel onSpin={handleSpin} spinning={spinning} setSpinning={setSpinning} muted={muted} />
               </div>
               <div className="w-full xl:w-80">
                 <SpinHistory history={history} />
