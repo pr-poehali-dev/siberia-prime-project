@@ -1,5 +1,6 @@
-import { useRef, useState, useEffect } from "react";
+import { useRef, useState, useEffect, useCallback } from "react";
 import { getColor } from "@/pages/Index";
+import WinParticles from "@/components/WinParticles";
 
 const NUMBERS = [
   0, 32, 15, 19, 4, 21, 2, 25, 17, 34, 6, 27, 13, 36,
@@ -9,12 +10,50 @@ const NUMBERS = [
 
 const SEGMENT_COUNT = NUMBERS.length;
 const SEGMENT_ANGLE = 360 / SEGMENT_COUNT;
-
 const RED_NUMBERS = [1,3,5,7,9,12,14,16,18,19,21,23,25,27,30,32,34,36];
 
 function getSegColor(n: number) {
   if (n === 0) return "#1a6b32";
   return RED_NUMBERS.includes(n) ? "#9b1c1c" : "#111111";
+}
+
+// Web Audio API sound engine
+function createAudioCtx(): AudioContext | null {
+  try {
+    return new (window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext)();
+  } catch { return null; }
+}
+
+function playTick(ctx: AudioContext, vol = 0.18) {
+  const osc = ctx.createOscillator();
+  const gain = ctx.createGain();
+  osc.connect(gain);
+  gain.connect(ctx.destination);
+  osc.type = "triangle";
+  osc.frequency.setValueAtTime(900 + Math.random() * 200, ctx.currentTime);
+  osc.frequency.exponentialRampToValueAtTime(300, ctx.currentTime + 0.04);
+  gain.gain.setValueAtTime(vol, ctx.currentTime);
+  gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.06);
+  osc.start(ctx.currentTime);
+  osc.stop(ctx.currentTime + 0.07);
+}
+
+function playWin(ctx: AudioContext) {
+  const notes = [523, 659, 784, 1047];
+  notes.forEach((freq, i) => {
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.type = "sine";
+    const t = ctx.currentTime + i * 0.12;
+    osc.frequency.setValueAtTime(freq, t);
+    gain.gain.setValueAtTime(0, t);
+    gain.gain.linearRampToValueAtTime(0.25, t + 0.04);
+    gain.gain.exponentialRampToValueAtTime(0.001, t + 0.35);
+    osc.start(t);
+    osc.stop(t + 0.4);
+  });
 }
 
 interface RouletteWheelProps {
@@ -26,13 +65,29 @@ interface RouletteWheelProps {
 export default function RouletteWheel({ onSpin, spinning, setSpinning }: RouletteWheelProps) {
   const [rotation, setRotation] = useState(0);
   const [lastResult, setLastResult] = useState<number | null>(null);
+  const [showParticles, setShowParticles] = useState(false);
   const rotationRef = useRef(0);
   const animRef = useRef<number | null>(null);
+  const audioCtxRef = useRef<AudioContext | null>(null);
+  const lastTickAngleRef = useRef(0);
+
+  const getAudioCtx = useCallback(() => {
+    if (!audioCtxRef.current) {
+      audioCtxRef.current = createAudioCtx();
+    }
+    if (audioCtxRef.current?.state === "suspended") {
+      audioCtxRef.current.resume();
+    }
+    return audioCtxRef.current;
+  }, []);
 
   const spin = () => {
     if (spinning) return;
     setSpinning(true);
     setLastResult(null);
+    setShowParticles(false);
+
+    const ctx = getAudioCtx();
 
     const targetIndex = Math.floor(Math.random() * SEGMENT_COUNT);
     const targetNumber = NUMBERS[targetIndex];
@@ -43,6 +98,7 @@ export default function RouletteWheel({ onSpin, spinning, setSpinning }: Roulett
 
     const startRotation = rotationRef.current;
     const endRotation = startRotation + totalRotation;
+    lastTickAngleRef.current = startRotation;
 
     const duration = 4500;
     const startTime = performance.now();
@@ -56,6 +112,17 @@ export default function RouletteWheel({ onSpin, spinning, setSpinning }: Roulett
       setRotation(current);
       rotationRef.current = current;
 
+      // tick sound on each segment crossing
+      if (ctx) {
+        const angleDelta = current - lastTickAngleRef.current;
+        if (angleDelta >= SEGMENT_ANGLE) {
+          const ticksCount = Math.floor(angleDelta / SEGMENT_ANGLE);
+          const speed = progress < 0.5 ? 0.25 : progress < 0.8 ? 0.2 : 0.15;
+          for (let i = 0; i < ticksCount; i++) playTick(ctx, speed);
+          lastTickAngleRef.current += ticksCount * SEGMENT_ANGLE;
+        }
+      }
+
       if (progress < 1) {
         animRef.current = requestAnimationFrame(animate);
       } else {
@@ -64,6 +131,9 @@ export default function RouletteWheel({ onSpin, spinning, setSpinning }: Roulett
         setSpinning(false);
         setLastResult(targetNumber);
         onSpin(targetNumber);
+        if (ctx) playWin(ctx);
+        setShowParticles(true);
+        setTimeout(() => setShowParticles(false), 3000);
       }
     };
 
@@ -94,7 +164,6 @@ export default function RouletteWheel({ onSpin, spinning, setSpinning }: Roulett
     const ty = cy + textR * Math.sin(midAngle);
     const textAngle = (midAngle * 180) / Math.PI + 90;
     const largeArc = SEGMENT_ANGLE > 180 ? 1 : 0;
-
     return { num, x1, y1, x2, y2, tx, ty, textAngle, largeArc, color: getSegColor(num) };
   });
 
@@ -102,12 +171,11 @@ export default function RouletteWheel({ onSpin, spinning, setSpinning }: Roulett
   const resultBg = resultColor === "red" ? "#9b1c1c" : resultColor === "black" ? "#111" : "#1a6b32";
 
   return (
-    <div className="flex flex-col items-center gap-6">
+    <div className="flex flex-col items-center gap-6 relative">
+      {showParticles && <WinParticles color={resultColor} />}
+
       <div className="relative wheel-shadow">
-        <div
-          className="wheel-outer"
-          style={{ width: size + 32, height: size + 32 }}
-        >
+        <div className="wheel-outer" style={{ width: size + 32, height: size + 32 }}>
           <svg
             width={size}
             height={size}
@@ -144,9 +212,7 @@ export default function RouletteWheel({ onSpin, spinning, setSpinning }: Roulett
           </svg>
         </div>
 
-        <div
-          className="pointer absolute top-[-6px] left-1/2 -translate-x-1/2 z-10"
-        >
+        <div className="pointer absolute top-[-6px] left-1/2 -translate-x-1/2 z-10">
           <div className="w-4 h-8 flex flex-col items-center">
             <div className="w-0 h-0 border-l-[8px] border-r-[8px] border-t-[16px] border-l-transparent border-r-transparent border-t-gold drop-shadow-lg" />
           </div>
@@ -154,10 +220,7 @@ export default function RouletteWheel({ onSpin, spinning, setSpinning }: Roulett
       </div>
 
       {lastResult !== null && (
-        <div
-          className="result-badge animate-scale-in"
-          style={{ backgroundColor: resultBg }}
-        >
+        <div className="result-badge animate-scale-in" style={{ backgroundColor: resultBg }}>
           <span className="font-playfair text-5xl font-black text-white">{lastResult}</span>
           <span className="font-oswald text-sm tracking-widest uppercase text-white/80 mt-1">
             {resultColor === "red" ? "Красное" : resultColor === "black" ? "Чёрное" : "Зеро"}
@@ -165,11 +228,7 @@ export default function RouletteWheel({ onSpin, spinning, setSpinning }: Roulett
         </div>
       )}
 
-      <button
-        onClick={spin}
-        disabled={spinning}
-        className="spin-btn"
-      >
+      <button onClick={spin} disabled={spinning} className="spin-btn">
         {spinning ? (
           <span className="flex items-center gap-2">
             <span className="inline-block w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin" />
