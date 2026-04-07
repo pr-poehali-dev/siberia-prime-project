@@ -38,6 +38,45 @@ function playTick(ctx: AudioContext, vol = 0.18) {
   osc.stop(ctx.currentTime + 0.07);
 }
 
+function playTension(ctx: AudioContext): () => void {
+  // Нарастающий дрон — низкий гул с вибрато, усиливается к концу
+  const osc = ctx.createOscillator();
+  const lfo = ctx.createOscillator();
+  const lfoGain = ctx.createGain();
+  const gain = ctx.createGain();
+
+  lfo.connect(lfoGain);
+  lfoGain.connect(osc.frequency);
+  osc.connect(gain);
+  gain.connect(ctx.destination);
+
+  osc.type = "sawtooth";
+  osc.frequency.setValueAtTime(55, ctx.currentTime);
+  osc.frequency.linearRampToValueAtTime(75, ctx.currentTime + 2.5);
+
+  lfo.type = "sine";
+  lfo.frequency.setValueAtTime(4, ctx.currentTime);
+  lfo.frequency.linearRampToValueAtTime(12, ctx.currentTime + 2.5);
+  lfoGain.gain.setValueAtTime(1, ctx.currentTime);
+  lfoGain.gain.linearRampToValueAtTime(8, ctx.currentTime + 2.5);
+
+  gain.gain.setValueAtTime(0, ctx.currentTime);
+  gain.gain.linearRampToValueAtTime(0.07, ctx.currentTime + 0.4);
+  gain.gain.linearRampToValueAtTime(0.18, ctx.currentTime + 2.5);
+
+  osc.start(ctx.currentTime);
+  lfo.start(ctx.currentTime);
+
+  return () => {
+    try {
+      gain.gain.setValueAtTime(gain.gain.value, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.15);
+      osc.stop(ctx.currentTime + 0.15);
+      lfo.stop(ctx.currentTime + 0.15);
+    } catch { /* already stopped */ }
+  };
+}
+
 function playWin(ctx: AudioContext) {
   const notes = [523, 659, 784, 1047];
   notes.forEach((freq, i) => {
@@ -102,6 +141,8 @@ export default function RouletteWheel({ onSpin, spinning, setSpinning }: Roulett
 
     const duration = 4500;
     const startTime = performance.now();
+    let stopTension: (() => void) | null = null;
+    let tensionStarted = false;
 
     const animate = (now: number) => {
       const elapsed = now - startTime;
@@ -111,6 +152,12 @@ export default function RouletteWheel({ onSpin, spinning, setSpinning }: Roulett
 
       setRotation(current);
       rotationRef.current = current;
+
+      // tension drone starts at 70% progress (замедление ощутимо)
+      if (ctx && progress >= 0.70 && !tensionStarted) {
+        tensionStarted = true;
+        stopTension = playTension(ctx);
+      }
 
       // tick sound on each segment crossing
       if (ctx) {
@@ -128,6 +175,7 @@ export default function RouletteWheel({ onSpin, spinning, setSpinning }: Roulett
       } else {
         setRotation(endRotation);
         rotationRef.current = endRotation;
+        if (stopTension) stopTension();
         setSpinning(false);
         setLastResult(targetNumber);
         onSpin(targetNumber);
